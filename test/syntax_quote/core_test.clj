@@ -15,7 +15,8 @@
                                   [3 4])])
        `{:a [1 2 ~@[3 4]]} (syntax-quote
                             {:a [1 2 (syntax-unquote-splicing
-                                      [3 4])]}))
+                                      [3 4])]})
+       `()                 (syntax-quote ()))
   (is (not (= 'foo (syntax-quote foo#))))
   (let [[f1 f2] (syntax-quote [foo# foo#])]
     (is (= f1 f2))))
