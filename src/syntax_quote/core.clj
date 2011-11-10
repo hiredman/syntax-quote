@@ -1,52 +1,88 @@
 (ns syntax-quote.core
-  (:use [clojure.contrib.java-utils :only [wall-hack-field]]))
+  (:import (clojure.lang Symbol ISeq IPersistentSet IPersistentMap
+                         IPersistentVector)))
 
-(defmulti squote* type)
+(def ^{:dynamic true} *symbol-table* nil)
 
-(defmulti squote*-seq first)
+(declare syntax-quote-fun)
 
-(defmethod squote* :default [form] (list 'quote form))
+(defmacro syntax-unquote [form]
+  (throw (Exception. (str "Unquote without quote"))))
 
-(defmethod squote* clojure.lang.Symbol [sym]
-  (letfn [(generate-symbol [sym] (gensym (name sym)))]
-    (list `quote
-          (cond
-           (namespace sym) sym
-           (.endsWith (name sym) "#") (generate-symbol sym)
-           :else (symbol (str *ns*) (name sym))))) )
+(defmacro syntax-unquote-splicing [form]
+  (throw (Exception. (str "Unquote without quote"))))
 
-(def splice nil)
+(defmulti recursive-quote type)
 
-(defmethod squote* clojure.lang.ISeq [form] (squote*-seq form))
+(defmethod recursive-quote :default [form]
+  form)
 
-(defmethod squote*-seq 'unsquote [[_ form]]
-  (map
-   (fn [el]
-     (if-let [[head & tail] (and (coll? el) (= 'squote (first el)) el)]
-       (apply squote* tail)
-       el))
-   form))
+(defmethod recursive-quote Symbol [form]
+  (list
+   'quote
+   (if-let [ns (namespace form)]
+     (if (class? (ns-resolve *ns* (symbol ns)))
+       (symbol (.getName (ns-resolve *ns* (symbol ns))) (name form))
+       form)
+     (let [symbol-name (name form)]
+       (if (.endsWith symbol-name "#")
+         (or (get *symbol-table* form)
+             (let [generated-symbol (gensym
+                                     (subs symbol-name 0
+                                           (dec (count symbol-name))))]
+               (set! *symbol-table*
+                     (assoc *symbol-table* form generated-symbol))
+               generated-symbol))
+         (symbol (name (ns-name *ns*)) (name form)))))))
 
-(defmethod squote*-seq :default [form]
-  (letfn [(reducer [accum form]
-                   (let [qf (squote* form)]
-                     (if splice
-                       (do (set! splice nil)
-                           (into accum qf))
-                       (conj accum qf))))]
-    (binding [splice nil] (cons `list (reduce reducer [] form)))))
+(defmethod recursive-quote ISeq [forms]
+  (if (= (first forms) `syntax-unquote)
+    (second forms)
+    (cons 'list (doall (for [form forms] (syntax-quote-fun form))))))
 
-(defmethod squote*-seq 'unsquote-splice [form]
-  (set! splice true)
-  (('unsquote (methods squote*-seq))
-   form))
+(defmethod recursive-quote IPersistentSet [forms]
+  (set (map syntax-quote-fun forms)))
 
-(def symbol-table nil)
+(defmethod recursive-quote IPersistentMap [forms]
+  (zipmap (rest (syntax-quote-fun (keys forms)))
+          (rest (syntax-quote-fun (vals forms)))))
 
-(defn squote [form]
-  (binding [symbol-table {}]
-    (squote* form)))
+(defmethod recursive-quote IPersistentVector [forms]
+  (vec (rest (syntax-quote-fun (seq forms)))))
 
-(defmacro Q [form]
-  (squote form))
+(defmulti syntax-quote-fun type)
 
+(defmethod syntax-quote-fun :default [o] (recursive-quote o))
+
+;; TODO: this doesn't actually unquote
+;; TODO: zipper?
+(defmethod syntax-quote-fun ISeq [forms]
+  (letfn [(iter [[f & fs]]
+            (lazy-seq
+             (if (and (instance? ISeq f)
+                      (symbol? (first f))
+                      (= (ns-resolve *ns* (first f)) #'syntax-unquote-splicing))
+               (concat (second f) (when fs (iter fs)))
+               (cons (recursive-quote f) (when fs (iter fs))))))]
+    (if (and (symbol? (first forms))
+             (= #'syntax-unquote (ns-resolve *ns* (first forms))))
+      (second forms)
+      (cons 'list (doall (iter forms))))))
+
+(defmethod syntax-quote-fun IPersistentSet [forms]
+  (set (syntax-quote-fun (seq forms))))
+
+(defmethod syntax-quote-fun IPersistentMap [forms]
+  (zipmap (map syntax-quote-fun (keys forms))
+          (map syntax-quote-fun (vals forms))))
+
+(defmethod syntax-quote-fun IPersistentVector [forms]
+  (list 'clojure.core/vec
+        (syntax-quote-fun (seq forms))))
+
+(defn syntax-quote-setup-symbol-table [form]
+  (binding [*symbol-table* {}]
+    (syntax-quote-fun form)))
+
+(defmacro syntax-quote [form]
+  (syntax-quote-setup-symbol-table form))
