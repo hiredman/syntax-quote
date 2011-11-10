@@ -64,10 +64,12 @@
                       (= (ns-resolve *ns* (first f)) #'syntax-unquote-splicing))
                (concat (second f) (when fs (iter fs)))
                (cons (recursive-quote f) (when fs (iter fs))))))]
-    (if (and (symbol? (first forms))
-             (= #'syntax-unquote (ns-resolve *ns* (first forms))))
-      (second forms)
-      (cons 'list (doall (iter forms))))))
+    (if (seq forms)
+      (if (and (symbol? (first forms))
+               (= #'syntax-unquote (ns-resolve *ns* (first forms))))
+        (second forms)
+        (cons 'list (doall (iter forms))))
+      ())))
 
 (defmethod syntax-quote-fun IPersistentSet [forms]
   (set (syntax-quote-fun (seq forms))))
