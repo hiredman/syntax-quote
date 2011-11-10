@@ -6,6 +6,11 @@
   (are [x y] (= x y)
        `(1 2 3)            (syntax-quote (1 2 3))
        `foo                (syntax-quote foo)
+       `{:a 1}             (syntax-quote {:a 1})
+       `{:a `{:b `(1 2 `[3])}} (syntax-quote
+                                {:a (syntax-quote
+                                     {:b (syntax-quote
+                                          (1 2 (syntax-quote [3])))})})
        `Boolean/TYPE       (syntax-quote Boolean/TYPE)
        `foo/bar            (syntax-quote foo/bar)
        `[foo bar baz]      (syntax-quote [foo bar baz])
