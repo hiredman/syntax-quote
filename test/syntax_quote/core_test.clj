@@ -2,6 +2,9 @@
   (:use [syntax-quote.core]
         [clojure.test]))
 
+(def x 1)
+(def y 2)
+
 (deftest t-syntax-quote
   (is (= `(1 2 3) (syntax-quote (1 2 3))))
   (is (= `foo (syntax-quote foo)))
@@ -33,4 +36,32 @@
     (is (= y1 y2))
     (is (= (eval rdr)
            (eval mac))))
-  )
+  (is (= `(. clojure.lang.Util equiv ~x ~y)
+         (syntax-quote (. clojure.lang.Util equiv
+                          (syntax-unquote x)
+                          (syntax-unquote y)))))
+  (is (= `(. clojure.lang.Util identical ~x ~y)
+         (syntax-quote (. clojure.lang.Util identical
+                          (syntax-unquote x)
+                          (syntax-unquote y)))))
+  (is (= `& (syntax-quote &)))
+
+  (is (= `'foo (syntax-quote (quote foo))))
+  
+  (is (= `(binding [*ns* *ns*]
+            (clojure.core/use
+             (quote clojure.core))
+            (eval (quote
+                   (do
+                     ~@[1 2 3]))))
+         (syntax-quote
+          (binding [*ns* *ns*]
+            (clojure.core/use
+             (quote clojure.core))
+            (eval (quote
+                   (do
+                     (syntax-unquote-splicing
+                      [1 2 3]))))))))
+  (is (= `'clojure.core
+         (syntax-quote 'clojure.core)))
+  (is (= `'foo.bar (syntax-quote 'foo.bar))))
