@@ -64,4 +64,12 @@
                       [1 2 3]))))))))
   (is (= `'clojure.core
          (syntax-quote 'clojure.core)))
-  (is (= `'foo.bar (syntax-quote 'foo.bar))))
+  (is (= `'foo.bar (syntax-quote 'foo.bar)))
+  (is (= `.. (syntax-quote ..)))
+  (is (= `(Object.) (syntax-quote (Object.))))
+  (is (= `(reify* (clojure.core/unquote 'interfaces)
+                  (clojure.core/unquote-splicing ['m1 'm2]))
+         (syntax-quote
+          (reify* (syntax-unquote 'interfaces)
+                  (syntax-unquote-splicing ['m1 'm2])))))
+  (is (= `#{1 2} (syntax-quote #{1 2}))))
