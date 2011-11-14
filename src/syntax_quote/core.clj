@@ -4,7 +4,7 @@
 
 (declare sq syntax-unquote syntax-unquote-splicing)
 
-(defn syntax-quote-seq [the-seq]
+(defn- syntax-quote-seq [the-seq]
   (if (seq the-seq)
     (list 'clojure.core/seq
           (list* 'clojure.core/concat
@@ -31,17 +31,17 @@
                  the-seq)))
     ()))
 
-(defn syntax-quote-map [the-map]
+(defn- syntax-quote-map [the-map]
   (list 'clojure.core/apply
         'clojure.core/hash-map
         (syntax-quote-seq (apply concat the-map))))
 
-(defn syntax-quote-vector [the-vector]
+(defn- syntax-quote-vector [the-vector]
   (list 'clojure.core/apply
         'clojure.core/vector
         (syntax-quote-seq the-vector)))
 
-(defn syntax-quote-collection [form]
+(defn- syntax-quote-collection [form]
   (if (seq? form)
     (if (if (symbol? (first form))
           (if (clojure.lang.Util/equiv
@@ -55,7 +55,7 @@
       (if (vector? form)
         (syntax-quote-vector form)))))
 
-(defn syntax-quote-gensym-symbol [symbol-name]
+(defn- syntax-quote-gensym-symbol [symbol-name]
   (let [sym (clojure.lang.RT/get *symbol-table* symbol-name)]
     (if sym
      sym
@@ -109,14 +109,14 @@
                         (symbol (.getName (.getName *ns*))
                                 symbol-name)))))))))))
 
-(defn sq [form]
+(defn- sq [form]
   (if (instance? clojure.lang.IPersistentCollection form)
     (syntax-quote-collection form)
     (if (symbol? form)
       (syntax-quote-symbol form)
       form)))
 
-(defn sq-with-symbol-table [form]
+(defn- sq-with-symbol-table [form]
   (clojure.lang.Var/pushThreadBindings {#'*symbol-table* {}})
   (try
     (sq form)
