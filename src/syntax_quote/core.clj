@@ -67,47 +67,72 @@
                               symbol-name new-sym))
        new-sym))))
 
+(defn- special?
+  "is this symbol the first of a special form?"
+  [sym]
+  (if (clojure.lang.RT/get clojure.lang.Compiler/specials sym)
+    true
+    (if (#{'finally '& 'fn* 'catch} sym)
+      true)))
 
-(defn syntax-quote-symbol [form]
-  (list 'quote
-        (if (if (clojure.lang.RT/get clojure.lang.Compiler/specials form)
+(defn- syntax-quote-symbol-resolve-constructor
+  "resolve symbols that are in the form of constructors:
+     String. => java.lang.String."
+  [symbol-name]
+  (let [c (clojure.lang.Compiler/maybeResolveIn
+           *ns* (symbol (subs symbol-name 1)))]
+    (symbol
+     (.concat (.getName c) "."))))
+
+(defn- namespace-for [inns sym]
+  (let [ns-sym (symbol (.getNamespace sym))
+        ns (.lookupAlias inns ns-sym)]
+    (if ns
+      ns
+      (clojure.lang.Namespace/find ns-sym))))
+
+(defn- resolve-symbol [sym]
+  (if (clojure.lang.Numbers/gt (.indexOf (.getName sym) ".") 0)
+    sym
+    (if (.getNamespace sym)
+      (let [ns (namespace-for *ns* sym)]
+        (if (if (not ns)
               true
-              (if (#{'finally '& 'fn* 'catch} form)
-                true))
+              (clojure.lang.Util/equiv
+               (.getName (.getName ns))
+               (.getName sym)))
+          sym
+          (symbol (.getName (.getName ns)) (.getName sym))))
+      (let [o (.getMapping *ns* sym)]
+        (if o
+          (if (instance? Class o)
+            (symbol (.getName o))
+            (if (instance? clojure.lang.Var o)
+              (symbol (.getName (.getName (.ns o)))
+                      (.getName (.sym o)))))
+          (symbol (.getName (.getName *ns*)) (.getName sym)))))))
+
+(defn- syntax-quote-symbol [form]
+  (list 'quote
+        (if (special? form)
           form
-          (if (.getNamespace form)
-            (let [the-class (try
-                              (clojure.lang.Compiler/maybeResolveIn
-                               *ns* (symbol (.getNamespace form)))
-                              (catch Exception _))]
-              (if (instance? Class the-class)
-                (symbol (.getName the-class) (.getName form))
-                (let [v (try
-                          (clojure.lang.Compiler/maybeResolveIn *ns* form)
-                          (catch Exception _))]
-                  (if v
-                    (symbol (.getName (.getName (.ns v))) (.getName form))
-                    form))))
-            (let [symbol-name (.getName form)]
+          (let [symbol-name (.getName form)]
               (if (.endsWith symbol-name "#")
                 (syntax-quote-gensym-symbol symbol-name)
-                (let [idx (.indexOf symbol-name ".")]
-                  (if (if (clojure.lang.Numbers/gt idx 1)
-                        (if (clojure.lang.Numbers/lt
-                             idx
-                             (clojure.lang.RT/count symbol-name))
-                          true))
+                (if (if (not (.getNamespace form))
+                      (.endsWith symbol-name "."))
+                  (syntax-quote-symbol-resolve-constructor symbol-name)
+                  (if (if (not (.getNamespace form))
+                      (.startsWith symbol-name "."))
                     form
-                    (let [v (try
-                              (clojure.lang.Compiler/maybeResolveIn *ns* form)
-                              (catch Exception _))]
-                      (if v
-                        (if (instance? Class v)
-                          (symbol (.getName v))
-                          (symbol (.getName (.getName (.ns v)))
-                                  (.getName (.sym v))))
-                        (symbol (.getName (.getName *ns*))
-                                symbol-name)))))))))))
+                    (if (.getNamespace form)
+                      (let [maybe-class (.getMapping *ns*
+                                                     (symbol
+                                                      (.getNamespace form)))]
+                        (if (instance? Class maybe-class)
+                          (symbol (.getName maybe-class) (.getName form))
+                          (resolve-symbol form)))
+                      (resolve-symbol form)))))))))
 
 (defn- sq [form]
   (if (instance? clojure.lang.IPersistentCollection form)
