@@ -72,4 +72,5 @@
          (syntax-quote
           (reify* (syntax-unquote 'interfaces)
                   (syntax-unquote-splicing ['m1 'm2])))))
-  (is (= `#{1 2} (syntax-quote #{1 2}))))
+  (is (= `#{1 2} (syntax-quote #{1 2})))
+  (is (= `#{~:foo} (syntax-quote #{(syntax-unquote :foo)}))))
