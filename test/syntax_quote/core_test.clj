@@ -73,4 +73,23 @@
           (reify* (syntax-unquote 'interfaces)
                   (syntax-unquote-splicing ['m1 'm2])))))
   (is (= `#{1 2} (syntax-quote #{1 2})))
-  (is (= `#{~:foo} (syntax-quote #{(syntax-unquote :foo)}))))
+  (is (= `#{~:foo} (syntax-quote #{(syntax-unquote :foo)})))
+  (is (= `var (syntax-quote var)))
+  (let [bindings '[a 1 b 2]
+        body '((+ a b))]
+    (is (= `(with-redefs-fn
+              ~(zipmap
+                (map (fn* [p1__3439#]
+                          (list `var p1__3439#))
+                     (take-nth 2 bindings))
+                (take-nth 2 (next bindings)))
+              (fn [] ~@body))
+           (syntax-quote
+            (with-redefs-fn
+              (syntax-unquote
+               (zipmap
+                (map (fn* [p1__3439#]
+                          (list (syntax-quote var) p1__3439#))
+                     (take-nth 2 bindings))
+                (take-nth 2 (next bindings))))
+              (fn [] (syntax-unquote-splicing body))))))))
