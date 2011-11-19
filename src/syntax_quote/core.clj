@@ -21,22 +21,26 @@
                         (map (partial transform env) the-seq))
         transform-coll (fn [env coll]
                          (if (seq? coll)
-                           ((:transform-seq env) env (expand env coll))
+                           (transform-seq env (expand env coll))
                            (if (set? coll)
-                             (set ((:transform-seq env) env (seq coll)))
+                             (set (transform-seq env (seq coll)))
                              (if (vector? coll)
-                               (vec ((:transform-seq env) env (seq coll)))
+                               (vec (transform-seq env (seq coll)))
                                (if (map? coll)
                                  (zipmap
-                                  ((:transform-seq env) env (keys coll))
-                                  ((:transform-seq env) env (vals coll)))
+                                  (transform-seq env (keys coll))
+                                  (transform-seq env (vals coll)))
                                  coll)))))
         env (env-map)]
     (cons 'do
-          (map (partial
-                transform
-                env)
-               body))))
+          ((fn map [fun the-seq]
+             (if (seq the-seq)
+               (cons (fun (first the-seq))
+                     (map fun (rest the-seq)))))
+           (partial
+            transform
+            env)
+           body))))
 
 (def ^{:dynamic true} *symbol-table*)
 
