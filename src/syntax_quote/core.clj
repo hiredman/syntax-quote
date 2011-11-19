@@ -1,5 +1,43 @@
 (ns syntax-quote.core)
 
+(defmacro env-map []
+  (into {} (for [[k _] &env] [(keyword (name k)) k])))
+
+(defmacro let-smacros
+  "macros: a map of symbols to what they should be replaced with in the body"
+  [macros & body]
+  (let [transform (fn [env body]
+                    (if (coll? body)
+                      ((:transform-coll env) env body)
+                      (if (symbol? body)
+                        (get macros body body)
+                        body)))
+        expand (fn [env the-seq]
+                 (let [m (macroexpand the-seq)]
+                   (if (= m the-seq)
+                     m
+                     (recur env m))))
+        transform-seq (fn [env the-seq]
+                        (map (partial transform env) the-seq))
+        transform-coll (fn [env coll]
+                         (if (seq? coll)
+                           ((:transform-seq env) env (expand env coll))
+                           (if (set? coll)
+                             (set ((:transform-seq env) env (seq coll)))
+                             (if (vector? coll)
+                               (vec ((:transform-seq env) env (seq coll)))
+                               (if (map? coll)
+                                 (zipmap
+                                  ((:transform-seq env) env (keys coll))
+                                  ((:transform-seq env) env (vals coll)))
+                                 coll)))))
+        env (env-map)]
+    (cons 'do
+          (map (partial
+                transform
+                env)
+               body))))
+
 (def ^{:dynamic true} *symbol-table*)
 
 (declare sq syntax-unquote syntax-unquote-splicing)
