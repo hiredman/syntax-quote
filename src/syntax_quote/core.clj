@@ -42,170 +42,179 @@
 
 (declare sq syntax-unquote syntax-unquote-splicing)
 
-(defn ^{:private true} namespace-for [inns sym]
-  (let [ns-sym (symbol (.getNamespace sym))
-        ns (.lookupAlias inns ns-sym)]
-    (if ns
-      ns
-      (clojure.lang.Namespace/find ns-sym))))
+;; written in a peculiar style because some stuff like 'or' is not
+;; defined until after syntax-quote exists
 
-(defn ^{:private true} resolve-symbol [sym]
-  (if (clojure.lang.Numbers/gt (.indexOf (.getName sym) ".") 0)
-    sym
-    (if (.getNamespace sym)
-      (let [ns (namespace-for *ns* sym)]
-        (if (if (not ns)
-              true
-              (clojure.lang.Util/equiv
-               (.getName (.getName ns))
-               (.getName sym)))
-          sym
-          (symbol (.getName (.getName ns)) (.getName sym))))
-      (let [o (.getMapping *ns* sym)]
-        (if o
-          (if (instance? Class o)
-            (symbol (.getName o))
-            (if (instance? clojure.lang.Var o)
-              (symbol (.getName (.getName (.ns o)))
-                      (.getName (.sym o)))))
-          (symbol (.getName (.getName *ns*)) (.getName sym)))))))
+(let-smacros
+ ;; setup a nice environment so it feels like full clojure
+ {namespace             .getNamespace
+  =                     clojure.lang.Util/equiv
+  name                  .getName
+  >                     clojure.lang.Numbers/gt
+  get                   clojure.lang.RT/get
+  count                 clojure.lang.RT/count
+  dec                   clojure.lang.Numbers/dec
+  find-ns               clojure.lang.Namespace/find
+  IPersistentCollection clojure.lang.IPersistentCollection
+  subs                  .substring
+  Var                   clojure.lang.Var
+  push-thread-bindings  clojure.lang.Var/pushThreadBindings
+  pop-thread-bindings   clojure.lang.Var/popThreadBindings
+  map                   (fn m [fun the-seq]
+                          (if (seq the-seq)
+                            (cons (fun (first the-seq))
+                                  (m fun (rest the-seq)))))
+  specials              clojure.lang.Compiler/specials
+  index-of              .indexOf
+  class?                (fn [o] (instance? Class o))}
 
-(defn ^{:private true} syntax-quote-seq [the-seq]
-  (if (seq the-seq)
-    (list 'clojure.core/seq
-          (list* 'clojure.core/concat
-                ((fn m [fun the-seq]
-                   (if (seq the-seq)
-                     (cons (fun (first the-seq))
-                           (m fun (rest the-seq)))))
-                 (fn [form]
-                   (if (if (seq? form)
-                         (if (symbol? (first form))
-                           (if (clojure.lang.Util/equiv
-                                'syntax-quote.core/syntax-unquote-splicing
-                                (resolve-symbol (first form)))
-                             true)))
-                     (second form)
-                     (if (if (seq? form)
-                           (if (symbol? (first form))
-                             (if (clojure.lang.Util/equiv
-                                  'syntax-quote.core/syntax-unquote
-                                  (resolve-symbol (first form)))
-                               true)))
-                       (list 'clojure.core/list (second form))
-                       (list 'clojure.core/list (sq form)))))
-                 the-seq)))
-    ()))
+ (defn ^{:private true} ends-or-contains [haystack-string needle-string]
+   (> (index-of haystack-string needle-string) 0))
 
-(defn ^{:private true} syntax-quote-map [the-map]
-  (list 'clojure.core/apply
-        'clojure.core/hash-map
-        (syntax-quote-seq (apply concat the-map))))
+ (defn ^{:private true} namespace-for [inns sym]
+   (let [ns-sym (symbol (namespace sym))
+         ns (.lookupAlias inns ns-sym)]
+     (if ns ns (find-ns ns-sym))))
 
-(defn ^{:private true} syntax-quote-vector [the-vector]
-  (list 'clojure.core/apply
-        'clojure.core/vector
-        (syntax-quote-seq the-vector)))
+ (defn ^{:private true} string-ns [ns]
+   (name (name ns)))
 
-(defn ^{:private true} syntax-quote-set [the-vector]
-  (list 'clojure.core/set
-        (syntax-quote-seq the-vector)))
-
-(defn ^{:private true} syntax-quote-collection [form]
-  (if (seq? form)
-    (if (if (symbol? (first form))
-          (if (clojure.lang.Util/equiv
-               'syntax-quote.core/syntax-unquote
-               (resolve-symbol (first form)))
-            true))
-      (second form)
-      (syntax-quote-seq form))
-    (if (map? form)
-      (syntax-quote-map form)
-      (if (vector? form)
-        (syntax-quote-vector form)
-        (if (set? form)
-          (syntax-quote-set form)
-          form)))))
-
-(defn ^{:private true} syntax-quote-gensym-symbol [symbol-name]
-  (let [sym (clojure.lang.RT/get *symbol-table* symbol-name)]
-    (if sym
+ (defn ^{:private true} resolve-symbol [sym]
+   (if (ends-or-contains (name sym) ".")
      sym
-     (let [new-sym (symbol (gensym (.substring symbol-name 0
-                                               (clojure.lang.Numbers/dec
-                                                (clojure.lang.RT/count
-                                                 symbol-name)))))]
-       (set! *symbol-table* (assoc *symbol-table*
-                              symbol-name new-sym))
-       new-sym))))
+     (if (namespace sym)
+       (let [ns (namespace-for *ns* sym)]
+         (if (if (not ns) true (= (string-ns ns) (name sym)))
+           sym
+           (symbol (string-ns ns) (name sym))))
+       (let [o (.getMapping *ns* sym)]
+         (if o
+           (if (class? o)
+             (symbol (name o))
+             (if (instance? Var o)
+               (symbol (string-ns (.ns o)) (name (.sym o)))))
+           (symbol (string-ns *ns*) (name sym)))))))
 
-(defn ^{:private true} special?
-  "is this symbol the first of a special form?"
-  [sym]
-  (if (clojure.lang.RT/get clojure.lang.Compiler/specials sym)
-    true
-    (if (#{'finally '& 'fn* 'catch} sym)
-      true)))
+ (defn ^{:private true} unquote-spliced? [form]
+   (if (seq? form)
+     (if (symbol? (first form))
+       (if (= 'syntax-quote.core/syntax-unquote-splicing
+              (resolve-symbol (first form)))
+         true))))
 
-(defn ^{:private true} syntax-quote-symbol-resolve-constructor
-  "resolve symbols that are in the form of constructors:
+ (defn ^{:private true} unquoted? [form]
+   (if (seq? form)
+     (if (symbol? (first form))
+       (if (= 'syntax-quote.core/syntax-unquote
+              (resolve-symbol (first form)))
+         true))))
+
+  (defn ^{:private true} syntax-quote-seq [the-seq]
+   (if (seq the-seq)
+     (list 'clojure.core/seq
+           (list* 'clojure.core/concat
+                  (map
+                   (fn [form]
+                     (if (unquote-spliced? form)
+                       (second form)
+                       (if (unquoted? form)
+                         (list 'clojure.core/list (second form))
+                         (list 'clojure.core/list (sq form)))))
+                   the-seq)))
+     ()))
+
+ (defn ^{:private true} syntax-quote-map [the-map]
+   (list 'clojure.core/apply
+         'clojure.core/hash-map
+         (syntax-quote-seq (apply concat the-map))))
+
+ (defn ^{:private true} syntax-quote-vector [the-vector]
+   (list 'clojure.core/apply
+         'clojure.core/vector
+         (syntax-quote-seq the-vector)))
+
+ (defn ^{:private true} syntax-quote-set [the-vector]
+   (list 'clojure.core/set
+         (syntax-quote-seq the-vector)))
+
+ (defn ^{:private true} syntax-quote-collection [form]
+   (if (seq? form)
+     (if (unquoted? form)
+       (second form)
+       (syntax-quote-seq form))
+     (if (map? form)
+       (syntax-quote-map form)
+       (if (vector? form)
+         (syntax-quote-vector form)
+         (if (set? form)
+           (syntax-quote-set form)
+           form)))))
+
+ (defn ^{:private true} syntax-quote-gensym-symbol [symbol-name]
+   (let [sym (get *symbol-table* symbol-name)]
+     (if sym
+       sym
+       (let [sym-stub (subs symbol-name 0 (dec (count symbol-name)))
+             new-sym (symbol (gensym sym-stub))]
+         (set! *symbol-table* (assoc *symbol-table*
+                                symbol-name new-sym))
+         new-sym))))
+
+ (defn ^{:private true} special?
+   "is this symbol the first of a special form?"
+   [sym]
+   (if (get specials sym)
+     true
+     (if (#{'finally '& 'fn* 'catch} sym)
+       true)))
+
+ (defn ^{:private true} syntax-quote-symbol-resolve-constructor
+   "resolve symbols that are in the form of constructors:
      String. => java.lang.String."
-  [symbol-name]
-  (let [c (clojure.lang.Compiler/maybeResolveIn
-           *ns* (symbol
-                 (.substring symbol-name 0
-                             (clojure.lang.Numbers/dec
-                              (.length symbol-name)))))]
-    (symbol
-     (.concat (.getName c) "."))))
+   [symbol-name]
+   (let [c (clojure.lang.Compiler/maybeResolveIn
+            *ns* (symbol
+                  (subs symbol-name 0
+                        (dec (count symbol-name)))))]
+     (symbol (.concat (name c) "."))))
 
+ (defn ^{:private true} syntax-quote-symbol [sym]
+   (list 'quote
+         (if (special? sym)
+           sym
+           (let [symbol-name (name sym)]
+             (if (.endsWith symbol-name "#")
+               (syntax-quote-gensym-symbol symbol-name)
+               (if (if (not (namespace sym))
+                     (if (.endsWith symbol-name ".")
+                       (not (.startsWith symbol-name "."))))
+                 (syntax-quote-symbol-resolve-constructor symbol-name)
+                 (if (if (not (namespace sym))
+                       (.startsWith symbol-name "."))
+                   sym
+                   (if (namespace sym)
+                     (let [maybe-class
+                           (.getMapping *ns* (symbol (namespace sym)))]
+                       (if (class? maybe-class)
+                         (symbol (name maybe-class) (name sym))
+                         (resolve-symbol sym)))
+                     (resolve-symbol sym)))))))))
 
+ (defn ^{:private true} sq [form]
+   (if (instance? IPersistentCollection form)
+     (syntax-quote-collection form)
+     (if (symbol? form)
+       (syntax-quote-symbol form)
+       form)))
 
-(defn ^{:private true} syntax-quote-symbol [form]
-  (list 'quote
-        (if (special? form)
-          form
-          (let [symbol-name (.getName form)]
-              (if (.endsWith symbol-name "#")
-                (syntax-quote-gensym-symbol symbol-name)
-                (if (if (not (.getNamespace form))
-                      (if (.endsWith symbol-name ".")
-                        (not (.startsWith symbol-name "."))))
-                  (syntax-quote-symbol-resolve-constructor symbol-name)
-                  (if (if (not (.getNamespace form))
-                        (.startsWith symbol-name "."))
-                    form
-                    (if (.getNamespace form)
-                      (let [maybe-class (.getMapping *ns*
-                                                     (symbol
-                                                      (.getNamespace form)))]
-                        (if (instance? Class maybe-class)
-                          (symbol (.getName maybe-class) (.getName form))
-                          (resolve-symbol form)))
-                      (resolve-symbol form)))))))))
+ (defn ^{:private true} sq-with-symbol-table [form]
+   (push-thread-bindings {#'*symbol-table* {}})
+   (try
+     (sq form)
+     (finally
+      (pop-thread-bindings))))
 
-(defn ^{:private true} sq [form]
-  (if (instance? clojure.lang.IPersistentCollection form)
-    (syntax-quote-collection form)
-    (if (symbol? form)
-      (syntax-quote-symbol form)
-      form)))
+ (defmacro syntax-quote [form]
+   (sq-with-symbol-table form))
 
-(defn ^{:private true} sq-with-symbol-table [form]
-  (clojure.lang.Var/pushThreadBindings {#'*symbol-table* {}})
-  (try
-    (sq form)
-    (finally
-     (clojure.lang.Var/popThreadBindings))))
-
-(defmacro syntax-quote [form]
-  (let [r (sq-with-symbol-table form)
-        id (gensym 'id)]
-    (.print System/out id)
-    (.print System/out " ")
-    (.print System/out form)
-    (.print System/out " => ")
-    (.print System/out r)
-    (list 'do (list '.println 'System/out ''id)
-          r)))
+ )
