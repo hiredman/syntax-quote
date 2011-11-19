@@ -1,37 +1,33 @@
 (ns syntax-quote.core)
 
-(defmacro env-map []
-  (into {} (for [[k _] &env] [(keyword (name k)) k])))
-
 (defmacro let-smacros
   "macros: a map of symbols to what they should be replaced with in the body"
   [macros & body]
-  (let [transform (fn [env body]
+  (let [transform (fn [transform-coll body]
                     (if (coll? body)
-                      ((:transform-coll env) env body)
+                      (transform-coll body)
                       (if (symbol? body)
                         (get macros body body)
                         body)))
-        expand (fn [env the-seq]
+        expand (fn [the-seq]
                  (let [m (macroexpand the-seq)]
                    (if (= m the-seq)
                      m
-                     (recur env m))))
-        transform-seq (fn [env the-seq]
-                        (map (partial transform env) the-seq))
-        transform-coll (fn [env coll]
+                     (recur m))))
+        transform-seq (fn [transform-coll the-seq]
+                        (map (partial transform transform-coll) the-seq))
+        transform-coll (fn transform-coll [coll]
                          (if (seq? coll)
-                           (transform-seq env (expand env coll))
+                           (transform-seq transform-coll (expand coll))
                            (if (set? coll)
-                             (set (transform-seq env (seq coll)))
+                             (set (transform-seq transform-coll (seq coll)))
                              (if (vector? coll)
-                               (vec (transform-seq env (seq coll)))
+                               (vec (transform-seq transform-coll (seq coll)))
                                (if (map? coll)
                                  (zipmap
-                                  (transform-seq env (keys coll))
-                                  (transform-seq env (vals coll)))
-                                 coll)))))
-        env (env-map)]
+                                  (transform-seq transform-coll (keys coll))
+                                  (transform-seq transform-coll (vals coll)))
+                                 coll)))))]
     (cons 'do
           ((fn map [fun the-seq]
              (if (seq the-seq)
@@ -39,7 +35,7 @@
                      (map fun (rest the-seq)))))
            (partial
             transform
-            env)
+            transform-coll)
            body))))
 
 (def ^{:dynamic true} *symbol-table*)
